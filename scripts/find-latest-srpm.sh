@@ -139,18 +139,19 @@ checksig_rc=$?
 set -e
 printf '%s\n' "$checksig_output" >&2
 
-# Confirm a GPG signature tag actually exists in the header (rpm's
-# --checksig summary line does not always name "gpg"/"pgp" explicitly
-# across rpm versions, e.g. "digests signatures OK"), independent of the
-# wording of the summary line above.
-sig_tags="$(rpm -qp --qf '%{SIGPGP:pgpsig} %{SIGGPG:pgpsig}\n' "$srpm_path" 2>/dev/null || true)"
+# Diagnostic only: legacy combined header+payload signatures use
+# SIGPGP/SIGGPG, while modern header-only RSA/DSA signing (used by this
+# SRPM) populates RSAHEADER/DSAHEADER instead and leaves SIGPGP/SIGGPG as
+# "(none)". Pass/fail is decided from the --checksig result below, not
+# from these tags, since the populated tag varies by signing method.
+sig_tags="$(rpm -qp --qf '%{SIGPGP:pgpsig} %{SIGGPG:pgpsig} %{RSAHEADER:pgpsig} %{DSAHEADER:pgpsig}\n' "$srpm_path" 2>/dev/null || true)"
 log "Signature header tags: $sig_tags"
 
 gpg_verified="false"
 if [[ $checksig_rc -eq 0 ]] \
    && printf '%s' "$checksig_output" | grep -qi 'OK' \
-   && ! printf '%s' "$checksig_output" | grep -qiE 'NOT OK|MISSING KEYS|BAD' \
-   && printf '%s' "$sig_tags" | grep -qivE '^\(none\)[[:space:]]*\(none\)$'; then
+   && printf '%s' "$checksig_output" | grep -qi 'signatures' \
+   && ! printf '%s' "$checksig_output" | grep -qiE 'NOT OK|MISSING KEYS|NOKEY|BAD'; then
   gpg_verified="true"
 fi
 
