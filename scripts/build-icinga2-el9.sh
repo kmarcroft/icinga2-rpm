@@ -75,15 +75,43 @@ log "Scanning spec file for Fedora-specific markers (informational only):"
 grep -nE '%\{?fedora\}?|\.fc[0-9]+|%fedora|fedora-release' "$spec_file" || log "  none found"
 
 # --- Step 4: apply the EL9 compatibility patch, if it contains real hunks ---
+# Hunks may target either the spec file itself (applied directly against
+# $EXTRACT_DIR) or files inside the upstream source tarball (applied
+# against an extraction of that tarball, which is then repacked in place).
 patch_has_hunks="false"
 if [[ -s "$PATCH_PATH" ]] && grep -qE '^(---|\+\+\+|@@)' "$PATCH_PATH"; then
   patch_has_hunks="true"
 fi
 
 if [[ "$patch_has_hunks" == "true" ]]; then
-  log "Applying EL9 compatibility patch: $PATCH_PATH"
-  (cd "$EXTRACT_DIR" && patch -p1 --forward --no-backup-if-mismatch < "$PATCH_PATH") \
-    || die "failed to apply packaging/icinga2-el9.patch to spec file"
+  patch_targets_source_tree="false"
+  if grep -E '^\+\+\+ ' "$PATCH_PATH" | grep -qvE '\.spec([[:space:]]|$)'; then
+    patch_targets_source_tree="true"
+  fi
+
+  if [[ "$patch_targets_source_tree" == "true" ]]; then
+    source_tarball_name="$(grep -E '^Source0?:' "$spec_file" | head -n1 | sed -E 's/^Source0?:[[:space:]]*//' | xargs basename)"
+    source_tarball_path="$EXTRACT_DIR/$source_tarball_name"
+    [[ -f "$source_tarball_path" ]] || die "EL9 compatibility patch targets the source tree, but source tarball '$source_tarball_name' was not found in the SRPM"
+
+    log "Applying EL9 compatibility patch against extracted source tarball: $source_tarball_name"
+    src_extract_dir="$WORKDIR/src-extract"
+    mkdir -p "$src_extract_dir"
+    tar -xzf "$source_tarball_path" -C "$src_extract_dir"
+
+    src_topdir_name="$(find "$src_extract_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | head -n1)"
+    [[ -n "$src_topdir_name" ]] || die "could not determine top-level directory inside source tarball $source_tarball_name"
+
+    (cd "$src_extract_dir/$src_topdir_name" && patch -p1 --forward --no-backup-if-mismatch < "$PATCH_PATH") \
+      || die "failed to apply packaging/icinga2-el9.patch to extracted source tree"
+
+    log "Repacking patched source tarball: $source_tarball_name"
+    tar -czf "$source_tarball_path" -C "$src_extract_dir" "$src_topdir_name"
+  else
+    log "Applying EL9 compatibility patch: $PATCH_PATH"
+    (cd "$EXTRACT_DIR" && patch -p1 --forward --no-backup-if-mismatch < "$PATCH_PATH") \
+      || die "failed to apply packaging/icinga2-el9.patch to spec file"
+  fi
 else
   log "No EL9 compatibility hunks present in $PATCH_PATH; current SRPM builds unchanged on EL9 apart from the release tag rewrite."
 fi

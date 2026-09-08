@@ -27,3 +27,29 @@
 ##
 ## Keep changes minimal, reviewable, and scoped strictly to EL9 build
 ## compatibility. Do not alter upstream Source0 versions or functionality.
+##
+## Hunks below with a "lib/otel/..." (or other non-*.spec) path are applied
+## by scripts/build-icinga2-el9.sh against the *extracted upstream source
+## tarball* (not the SRPM top-level files), then the tarball is repacked
+## before rpmbuild -bs runs. Hunks targeting the spec file itself are
+## applied directly against the SRPM top-level extraction directory.
+##
+## EL9 ships protobuf/protoc 3.14, which requires the
+## --experimental_allow_proto3_optional flag for .proto files using proto3
+## "optional" fields (Fedora ships a newer protoc where this is the
+## default). Without it, protoc fails on
+## opentelemetry/proto/metrics/v1/metrics.proto with:
+##   "This file contains proto3 optional fields, but
+##    --experimental_allow_proto3_optional was not set."
+## Pass the flag explicitly via CMake's protobuf_generate(PROTOC_OPTIONS ...)
+## (supported since CMake 3.28; EL9's cmake is 3.31).
+--- a/lib/otel/CMakeLists.txt
++++ b/lib/otel/CMakeLists.txt
+@@ -15,6 +15,7 @@
+   #
+   # [^1]: https://protobuf.dev/programming-guides/proto3/#options
+   PLUGIN_OPTIONS lite
++  PROTOC_OPTIONS --experimental_allow_proto3_optional
+   OUT_VAR otel_PROTO_SRCS
+   IMPORT_DIRS "${ICINGA2_OPENTELEMETRY_PROTOS_DIR}"
+   PROTOS
