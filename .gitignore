@@ -1,0 +1,11 @@
+node_modules/
+work/
+result/
+*.rpm
+*.src.rpm
+*.log
+mock-cache/
+.mock/
+/tmp/
+*.tmp
+.DS_Store

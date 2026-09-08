@@ -1,0 +1,301 @@
+name: Build Icinga 2 for EL9
+
+on:
+  workflow_dispatch:
+    inputs:
+      srpm_url:
+        description: "Optional explicit SRPM URL to build (overrides auto-discovery)"
+        required: false
+        type: string
+        default: ""
+      version_override:
+        description: "Optional Icinga 2 version to select during auto-discovery (e.g. 2.16.5)"
+        required: false
+        type: string
+        default: ""
+      target_arch:
+        description: "Target architecture"
+        required: false
+        type: choice
+        options: ["x86_64"]
+        default: "x86_64"
+      debug_mode:
+        description: "Enable verbose debug logging"
+        required: false
+        type: boolean
+        default: false
+      create_release:
+        description: "Create a GitHub Release for this build"
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 3 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-icinga2-el9.yml"
+      - "scripts/**"
+      - "mock/**"
+      - "packaging/**"
+
+concurrency:
+  group: build-icinga2-el9-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TARGET_ARCH: ${{ inputs.target_arch || 'x86_64' }}
+  DEBUG_MODE: ${{ inputs.debug_mode || 'false' }}
+  ARTIFACT_RETENTION_DAYS: "30"
+
+jobs:
+  discover:
+    name: Discover newest upstream SRPM
+    runs-on: ubuntu-latest
+    container:
+      image: almalinux:9
+    outputs:
+      srpm_filename: ${{ steps.find.outputs.srpm_filename }}
+      srpm_url: ${{ steps.find.outputs.srpm_url }}
+      rpm_version: ${{ steps.find.outputs.rpm_version }}
+      rpm_release: ${{ steps.find.outputs.rpm_release }}
+      rpm_nevra: ${{ steps.find.outputs.rpm_nevra }}
+      sha256: ${{ steps.find.outputs.sha256 }}
+      gpg_verified: ${{ steps.find.outputs.gpg_verified }}
+      skip: ${{ steps.skipcheck.outputs.skip }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Install discovery tools
+        run: |
+          set -Eeuo pipefail
+          dnf install -y --setopt=install_weak_deps=False curl rpm rpmdevtools gnupg2 findutils gawk >/dev/null
+
+      - name: Find and verify newest Icinga 2 SRPM
+        id: find
+        env:
+          EXPLICIT_SRPM_URL: ${{ inputs.srpm_url }}
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+        run: |
+          chmod +x scripts/find-latest-srpm.sh
+          WORKDIR="$GITHUB_WORKSPACE/work" scripts/find-latest-srpm.sh
+          cp "$GITHUB_WORKSPACE/work"/*.src.rpm "$GITHUB_WORKSPACE/upstream.src.rpm"
+
+      - name: Upload verified upstream SRPM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: upstream-srpm
+          path: upstream.src.rpm
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
+
+      - name: Check for already-published release (schedule only)
+        id: skipcheck
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RPM_VERSION: ${{ steps.find.outputs.rpm_version }}
+        run: |
+          chmod +x scripts/check-existing-release.sh
+          scripts/check-existing-release.sh
+
+      # Note: steps.skipcheck only runs on 'schedule' events. On all other
+      # trigger types its output is empty, and the downstream job condition
+      # `needs.discover.outputs.skip != 'true'` treats an empty string the
+      # same as "false" (i.e. do not skip).
+
+      - name: Job summary
+        run: |
+          {
+            echo "### Discovery result"
+            echo "- Upstream NEVRA: \`${{ steps.find.outputs.rpm_nevra }}\`"
+            echo "- Upstream URL: ${{ steps.find.outputs.srpm_url }}"
+            echo "- Signature verified: \`${{ steps.find.outputs.gpg_verified }}\`"
+            echo "- Scheduled-run skip decision: \`${{ steps.skipcheck.outputs.skip || 'false' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build on EL9 (mock)
+    needs: discover
+    if: needs.discover.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: almalinux:9
+      options: --privileged
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Download verified upstream SRPM
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: upstream-srpm
+          path: incoming
+
+      - name: Enable EPEL and CRB, install build/host tools
+        run: |
+          set -Eeuo pipefail
+          dnf install -y --setopt=install_weak_deps=False epel-release >/dev/null
+          dnf config-manager --set-enabled crb
+          dnf install -y --setopt=install_weak_deps=False \
+            mock rpm-build rpmdevtools rpmlint distribution-gpg-keys \
+            jq gnupg2 curl python3 findutils diffutils patch >/dev/null
+          usermod -a -G mock "$(id -un)" || true
+
+      - name: Cache DNF package cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: /var/cache/dnf
+          key: dnf-el9-${{ env.TARGET_ARCH }}-${{ hashFiles('mock/icinga2-el9-x86_64.cfg') }}
+
+      - name: Rebuild inside EL9 mock chroot
+        env:
+          SRPM_PATH: incoming/upstream.src.rpm
+          PATCH_PATH: packaging/icinga2-el9.patch
+          MOCK_CONFIGDIR: mock
+          MOCK_ROOT: icinga2-el9-x86_64
+          RESULT_DIR: result
+          DEBUG_MODE: ${{ env.DEBUG_MODE }}
+        run: |
+          chmod +x scripts/build-icinga2-el9.sh
+          scripts/build-icinga2-el9.sh
+
+      - name: Generate build manifest
+        env:
+          RESULT_DIR: result
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUNNER_IMAGE_NAME: "almalinux:9 (GitHub-hosted ubuntu-latest container)"
+          TARGET_DIST: el9
+          TARGET_ARCH: ${{ env.TARGET_ARCH }}
+          UPSTREAM_SRPM_URL: ${{ needs.discover.outputs.srpm_url }}
+          UPSTREAM_NEVRA: ${{ needs.discover.outputs.rpm_nevra }}
+          GPG_VERIFIED: ${{ needs.discover.outputs.gpg_verified }}
+          REPO_DEFINITIONS: "AlmaLinux 9 BaseOS/AppStream/CRB + EPEL 9 (see mock/icinga2-el9-x86_64.cfg)"
+        run: |
+          chmod +x scripts/generate-manifest.sh
+          scripts/generate-manifest.sh
+
+      - name: Record upstream SRPM URL and signature result
+        run: |
+          {
+            echo "upstream_srpm_url=${{ needs.discover.outputs.srpm_url }}"
+            echo "upstream_srpm_sha256=${{ needs.discover.outputs.sha256 }}"
+            echo "upstream_gpg_verified=${{ needs.discover.outputs.gpg_verified }}"
+          } > result/upstream-provenance.txt
+
+      - name: Job summary
+        run: |
+          {
+            echo "### Build result"
+            echo "- Result directory RPM count: $(find result -maxdepth 1 -name '*.rpm' ! -name '*.src.rpm' | wc -l)"
+            echo "- rpmlint report attached as artifact"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: icinga2-el9-${{ needs.discover.outputs.rpm_version }}-${{ env.TARGET_ARCH }}
+          path: result/
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
+
+  test-install:
+    name: Validate installation on fresh EL9
+    needs: [discover, build]
+    if: needs.discover.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: almalinux:9
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: icinga2-el9-${{ needs.discover.outputs.rpm_version }}-${{ env.TARGET_ARCH }}
+          path: result
+
+      - name: Install and validate packages (no service start)
+        env:
+          RPM_DIR: result
+        run: |
+          chmod +x scripts/test-install-el9.sh
+          scripts/test-install-el9.sh
+
+  release:
+    name: Publish GitHub Release
+    needs: [discover, build, test-install]
+    if: |
+      needs.discover.outputs.skip != 'true' &&
+      (
+        (github.event_name == 'workflow_dispatch' && inputs.create_release == true) ||
+        (github.event_name == 'schedule')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: icinga2-el9-${{ needs.discover.outputs.rpm_version }}-${{ env.TARGET_ARCH }}
+          path: result
+
+      - name: Determine internal release tag
+        id: tag
+        run: |
+          set -Eeuo pipefail
+          internal_release="$(rpm -qp --qf '%{RELEASE}' result/*.src.rpm 2>/dev/null | head -n1)"
+          if [[ -z "$internal_release" ]]; then
+            # Fallback: read from any built binary RPM if src.rpm glob failed to match.
+            internal_release="$(rpm -qp --qf '%{RELEASE}' "$(find result -maxdepth 1 -name '*.rpm' ! -name '*.src.rpm' | head -n1)")"
+          fi
+          tag="icinga2-el9-${{ needs.discover.outputs.rpm_version }}-${internal_release}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "internal_release=$internal_release" >> "$GITHUB_OUTPUT"
+
+      - name: Abort if release tag already exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view "${{ steps.tag.outputs.tag }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "ERROR: release ${{ steps.tag.outputs.tag }} already exists; refusing to overwrite." >&2
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          notes_file="$(mktemp)"
+          {
+            echo "Internally rebuilt Icinga 2 packages for Enterprise Linux 9 (AlmaLinux 9 / Rocky Linux 9 / RHEL 9)."
+            echo
+            echo "**These are NOT official Icinga-supported EL9 packages.**"
+            echo
+            echo "- Upstream SRPM URL: ${{ needs.discover.outputs.srpm_url }}"
+            echo "- Upstream SRPM NEVRA: ${{ needs.discover.outputs.rpm_nevra }}"
+            echo "- Upstream signature verified: ${{ needs.discover.outputs.gpg_verified }}"
+            echo "- Internal release: ${{ steps.tag.outputs.internal_release }}"
+            echo
+            echo "See build-manifest.json in the release assets for full provenance,"
+            echo "and packaging/icinga2-el9.patch in this repository for the applied EL9 compatibility changes (if any)."
+          } > "$notes_file"
+
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --title "icinga2 EL9 rebuild ${{ needs.discover.outputs.rpm_version }} (${{ steps.tag.outputs.internal_release }})" \
+            --notes-file "$notes_file" \
+            result/*.rpm result/*.src.rpm result/checksums.sha256 result/build-manifest.json

@@ -1,0 +1,29 @@
+## EL9 compatibility patch for the Icinga 2 spec file.
+##
+## This file is intentionally a no-op placeholder: as of the last review,
+## the Fedora 44 icinga2.spec builds unchanged inside the EL9 mock chroot
+## defined in mock/icinga2-el9-x86_64.cfg once the release tag is rewritten
+## (which scripts/build-icinga2-el9.sh does automatically and unconditionally,
+## independent of this patch).
+##
+## scripts/build-icinga2-el9.sh detects whether this file contains real
+## unified-diff hunks (lines starting with "---", "+++", or "@@"). Since it
+## does not, the build script logs that no compatibility patch was applied
+## and proceeds with the unmodified (release-rewritten) spec file.
+##
+## If a future Fedora 44 SRPM introduces an EL9-incompatible construct
+## (e.g. a BuildRequires only available in Fedora, a %fedora conditional
+## that excludes EL9, a macro not defined on EL9), replace the contents of
+## this file with a minimal `diff -u` against the extracted icinga2.spec,
+## in the form:
+##
+##   --- icinga2.spec.orig
+##   +++ icinga2.spec
+##   @@ -N,M +N,M @@
+##    context line
+##   -removed line
+##   +added line
+##    context line
+##
+## Keep changes minimal, reviewable, and scoped strictly to EL9 build
+## compatibility. Do not alter upstream Source0 versions or functionality.
