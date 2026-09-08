@@ -16,9 +16,15 @@ command -v dnf >/dev/null 2>&1 || die "dnf is required"
 mapfile -t rpms < <(find "$RPM_DIR" -maxdepth 1 -name '*.rpm' ! -name '*.src.rpm')
 [[ "${#rpms[@]}" -gt 0 ]] || die "no binary RPMs found in $RPM_DIR"
 
+# icinga2-selinux Requires icinga-selinux-common/nagios-selinux, which are
+# Fedora selinux-policy subpackage names with no EL9/EPEL 9 equivalent.
+# It is still built and shipped; just excluded from this install smoke test.
+mapfile -t install_rpms < <(printf '%s\n' "${rpms[@]}" | grep -vE '/icinga2-selinux-[^/]+\.rpm$' || true)
+[[ "${#install_rpms[@]}" -gt 0 ]] || die "no installable binary RPMs remain after excluding icinga2-selinux"
+
 log "Installing packages via dnf with dependency resolution:"
-printf '  - %s\n' "${rpms[@]}" >&2
-dnf install -y --setopt=install_weak_deps=False "${rpms[@]}"
+printf '  - %s\n' "${install_rpms[@]}" >&2
+dnf install -y --setopt=install_weak_deps=False "${install_rpms[@]}"
 
 log "icinga2 --version:"
 icinga2 --version || die "icinga2 --version failed"
