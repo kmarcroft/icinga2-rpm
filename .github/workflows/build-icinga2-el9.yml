@@ -73,7 +73,7 @@ jobs:
       - name: Install discovery tools
         run: |
           set -Eeuo pipefail
-          dnf install -y --setopt=install_weak_deps=False curl rpm rpmdevtools gnupg2 findutils gawk >/dev/null
+          dnf install -y --allowerasing --setopt=install_weak_deps=False curl rpm rpmdevtools gnupg2 findutils gawk >/dev/null
 
       - name: Find and verify newest Icinga 2 SRPM
         id: find
@@ -140,9 +140,9 @@ jobs:
       - name: Enable EPEL and CRB, install build/host tools
         run: |
           set -Eeuo pipefail
-          dnf install -y --setopt=install_weak_deps=False epel-release >/dev/null
+          dnf install -y --allowerasing --setopt=install_weak_deps=False epel-release >/dev/null
           dnf config-manager --set-enabled crb
-          dnf install -y --setopt=install_weak_deps=False \
+          dnf install -y --allowerasing --setopt=install_weak_deps=False \
             mock rpm-build rpmdevtools rpmlint distribution-gpg-keys \
             jq gnupg2 curl python3 findutils diffutils patch >/dev/null
           usermod -a -G mock "$(id -un)" || true
