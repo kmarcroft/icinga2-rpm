@@ -75,26 +75,46 @@ log "Scanning spec file for Fedora-specific markers (informational only):"
 grep -nE '%\{?fedora\}?|\.fc[0-9]+|%fedora|fedora-release' "$spec_file" || log "  none found"
 
 # --- Step 4: apply the EL9 compatibility patch, if it contains real hunks ---
-# Hunks may target either the spec file itself (applied directly against
-# $EXTRACT_DIR) or files inside the upstream source tarball (applied
-# against an extraction of that tarball, which is then repacked in place).
+# The combined patch file may carry hunks for both the spec file itself
+# (applied directly against $EXTRACT_DIR) and files inside the upstream
+# source tarball (applied against an extraction of that tarball, which is
+# then repacked in place). Split the patch by target file so each hunk is
+# routed to the right place.
 patch_has_hunks="false"
 if [[ -s "$PATCH_PATH" ]] && grep -qE '^(---|\+\+\+|@@)' "$PATCH_PATH"; then
   patch_has_hunks="true"
 fi
 
 if [[ "$patch_has_hunks" == "true" ]]; then
-  patch_targets_source_tree="false"
-  if grep -E '^\+\+\+ ' "$PATCH_PATH" | grep -qvE '\.spec([[:space:]]|$)'; then
-    patch_targets_source_tree="true"
+  spec_patch="$WORKDIR/spec-hunks.patch"
+  source_patch="$WORKDIR/source-hunks.patch"
+  : > "$spec_patch"
+  : > "$source_patch"
+
+  awk -v spec_out="$spec_patch" -v src_out="$source_patch" '
+    /^--- / { pending = $0 "\n"; waiting = 1; next }
+    waiting && /^\+\+\+ / {
+      pending = pending $0 "\n"
+      out = ($2 ~ /\.spec([ \t]|$)/) ? spec_out : src_out
+      printf "%s", pending >> out
+      waiting = 0
+      next
+    }
+    out != "" { printf "%s\n", $0 >> out }
+  ' "$PATCH_PATH"
+
+  if [[ -s "$spec_patch" ]]; then
+    log "Applying EL9 compatibility patch (spec-file hunks): $PATCH_PATH"
+    (cd "$EXTRACT_DIR" && patch -p1 --forward --no-backup-if-mismatch < "$spec_patch") \
+      || die "failed to apply spec-file hunks from packaging/icinga2-el9.patch"
   fi
 
-  if [[ "$patch_targets_source_tree" == "true" ]]; then
+  if [[ -s "$source_patch" ]]; then
     source_tarball_name="$(grep -E '^Source0?:' "$spec_file" | head -n1 | sed -E 's/^Source0?:[[:space:]]*//' | xargs basename)"
     source_tarball_path="$EXTRACT_DIR/$source_tarball_name"
     [[ -f "$source_tarball_path" ]] || die "EL9 compatibility patch targets the source tree, but source tarball '$source_tarball_name' was not found in the SRPM"
 
-    log "Applying EL9 compatibility patch against extracted source tarball: $source_tarball_name"
+    log "Applying EL9 compatibility patch (source-tree hunks) against extracted source tarball: $source_tarball_name"
     src_extract_dir="$WORKDIR/src-extract"
     mkdir -p "$src_extract_dir"
     tar -xzf "$source_tarball_path" -C "$src_extract_dir"
@@ -102,15 +122,15 @@ if [[ "$patch_has_hunks" == "true" ]]; then
     src_topdir_name="$(find "$src_extract_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | head -n1)"
     [[ -n "$src_topdir_name" ]] || die "could not determine top-level directory inside source tarball $source_tarball_name"
 
-    (cd "$src_extract_dir/$src_topdir_name" && patch -p1 --forward --no-backup-if-mismatch < "$PATCH_PATH") \
-      || die "failed to apply packaging/icinga2-el9.patch to extracted source tree"
+    (cd "$src_extract_dir/$src_topdir_name" && patch -p1 --forward --no-backup-if-mismatch < "$source_patch") \
+      || die "failed to apply source-tree hunks from packaging/icinga2-el9.patch"
 
     log "Repacking patched source tarball: $source_tarball_name"
     tar -czf "$source_tarball_path" -C "$src_extract_dir" "$src_topdir_name"
-  else
-    log "Applying EL9 compatibility patch: $PATCH_PATH"
-    (cd "$EXTRACT_DIR" && patch -p1 --forward --no-backup-if-mismatch < "$PATCH_PATH") \
-      || die "failed to apply packaging/icinga2-el9.patch to spec file"
+  fi
+
+  if [[ ! -s "$spec_patch" && ! -s "$source_patch" ]]; then
+    die "packaging/icinga2-el9.patch contains hunk markers, but no hunk could be routed to the spec file or the source tree"
   fi
 else
   log "No EL9 compatibility hunks present in $PATCH_PATH; current SRPM builds unchanged on EL9 apart from the release tag rewrite."

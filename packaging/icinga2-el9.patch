@@ -53,3 +53,49 @@
    OUT_VAR otel_PROTO_SRCS
    IMPORT_DIRS "${ICINGA2_OPENTELEMETRY_PROTOS_DIR}"
    PROTOS
+
+## %install hardcodes DESTDIR/install paths to a Fedora-specific nested
+## build directory (%_topdir/BUILD/icinga2-VERSION-build/BUILDROOT) that
+## only matches rpm's actual packaging %{buildroot} on Fedora's newer
+## redhat-rpm-config (which redefines %{buildroot} for vpath/out-of-tree
+## cmake builds). EL9's redhat-rpm-config uses the standard
+## %{_topdir}/BUILDROOT/%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH} layout, so
+## on EL9 nothing actually lands in %{buildroot} and %files fails with
+## "File not found" for every path. Fix: install into the portable
+## %{buildroot} macro directly instead of the hardcoded Fedora path.
+--- a/icinga2.spec
++++ b/icinga2.spec
+@@ -183,25 +183,25 @@
+ cd -
+ 
+ %install
+-DESTDIR="%_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT" ninja-build install
++DESTDIR="%{buildroot}" ninja-build install
+ 
+-install -D -m 0644 etc/initsystem/icinga2.service.limits.conf %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/etc/systemd/system/icinga2.service.d/limits.conf
++install -D -m 0644 etc/initsystem/icinga2.service.limits.conf %{buildroot}/etc/systemd/system/icinga2.service.d/limits.conf
+ 
+-rm -f %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT//etc/icinga2/features-enabled/*.conf
++rm -f %{buildroot}//etc/icinga2/features-enabled/*.conf
+ 
+ cd tools/selinux
+ for selinuxvariant in mls targeted
+ do
+-install -d %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/selinux/${selinuxvariant}
++install -d %{buildroot}/usr/share/selinux/${selinuxvariant}
+ install -p -m 644 icinga2.pp.${selinuxvariant} \
+-%_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/selinux/${selinuxvariant}/icinga2.pp
++%{buildroot}/usr/share/selinux/${selinuxvariant}/icinga2.pp
+ done
+ cd -
+ 
+-install -D -m 0644 tools/syntax/vim/syntax/icinga2.vim %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/vim/vimfiles/syntax/icinga2.vim
+-install -D -m 0644 tools/syntax/vim/ftdetect/icinga2.vim %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/vim/vimfiles/ftdetect/icinga2.vim
++install -D -m 0644 tools/syntax/vim/syntax/icinga2.vim %{buildroot}/usr/share/vim/vimfiles/syntax/icinga2.vim
++install -D -m 0644 tools/syntax/vim/ftdetect/icinga2.vim %{buildroot}/usr/share/vim/vimfiles/ftdetect/icinga2.vim
+ 
+-install -D -m 0644 tools/syntax/nano/icinga2.nanorc %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/nano/icinga2.nanorc
++install -D -m 0644 tools/syntax/nano/icinga2.nanorc %{buildroot}/usr/share/nano/icinga2.nanorc
+ 
+ %check
+ export CTEST_OUTPUT_ON_FAILURE=1
