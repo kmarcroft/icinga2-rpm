@@ -89,11 +89,31 @@ else
 fi
 
 # --- Step 5: rewrite Release to a clearly-identifiable internal EL9 build ---
-if grep -qE '^Release:.*%\{\?dist\}' "$spec_file"; then
-  sed -i -E 's/^(Release:[[:space:]]*)([^%[:space:]]+)(%\{\?dist\}.*)$/\1\2.internal1\3/' "$spec_file"
+# The Fedora spec may already use %{?dist} in Release:, or it may hardcode
+# a literal Fedora release suffix (e.g. "1.fc44") that is also repeated
+# verbatim in subpackage Requires/Conflicts lines (e.g.
+# "Requires: icinga2-bin = 2.16.5-1.fc44"). Both forms must end up
+# rewritten consistently so subpackage dependencies still resolve against
+# the rebuilt NVR.
+version_value="$(grep -E '^Version:' "$spec_file" | head -n1 | sed -E 's/^Version:[[:space:]]*//')"
+old_release_value="$(grep -E '^Release:' "$spec_file" | head -n1 | sed -E 's/^Release:[[:space:]]*//')"
+[[ -n "$version_value" && -n "$old_release_value" ]] || die "could not read Version/Release from spec file"
+
+if [[ "$old_release_value" == *'%{?dist}'* ]]; then
+  new_release_value="${old_release_value/\%\{?dist\}/.internal1%{?dist}}"
+elif [[ "$old_release_value" =~ ^(.+)\.fc[0-9]+$ ]]; then
+  new_release_value="${BASH_REMATCH[1]}.internal1%{?dist}"
+  # Rewrite the literal upstream NVR (e.g. "2.16.5-1.fc44") to the
+  # relocatable %{version}-%{release} form wherever it is hardcoded.
+  old_nvr="${version_value}-${old_release_value}"
+  spec_content="$(cat "$spec_file")"
+  spec_content="${spec_content//$old_nvr/%{version}-%{release}}"
+  printf '%s\n' "$spec_content" > "$spec_file"
 else
-  die "spec file Release: tag does not use %{?dist}; refusing to guess a release rewrite"
+  die "spec file Release: tag ('$old_release_value') uses neither %{?dist} nor a recognizable .fcNN suffix; refusing to guess a release rewrite"
 fi
+
+sed -i -E "s#^Release:.*#Release:        ${new_release_value}#" "$spec_file"
 log "Rewritten Release line: $(grep -E '^Release:' "$spec_file")"
 
 # --- Step 6: rebuild the SRPM with the patched/rewritten spec ---------------
