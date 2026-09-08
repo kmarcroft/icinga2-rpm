@@ -100,14 +100,20 @@ old_release_value="$(grep -E '^Release:' "$spec_file" | head -n1 | sed -E 's/^Re
 [[ -n "$version_value" && -n "$old_release_value" ]] || die "could not read Version/Release from spec file"
 
 if [[ "$old_release_value" == *'%{?dist}'* ]]; then
-  new_release_value="${old_release_value/\%\{?dist\}/.internal1%{?dist}}"
+  # NOTE: the replacement text must be held in a variable, not written
+  # inline inside ${var/pattern/replacement} — bash's brace-matching for
+  # the ${...} expansion gets confused by literal "}" characters inside
+  # an inline replacement (e.g. from "%{?dist}"), silently truncating it.
+  dist_replacement=".marckri1%{?dist}"
+  new_release_value="${old_release_value/\%\{?dist\}/$dist_replacement}"
 elif [[ "$old_release_value" =~ ^(.+)\.fc[0-9]+$ ]]; then
-  new_release_value="${BASH_REMATCH[1]}.internal1%{?dist}"
+  new_release_value="${BASH_REMATCH[1]}.marckri1%{?dist}"
   # Rewrite the literal upstream NVR (e.g. "2.16.5-1.fc44") to the
   # relocatable %{version}-%{release} form wherever it is hardcoded.
   old_nvr="${version_value}-${old_release_value}"
+  nvr_replacement="%{version}-%{release}"
   spec_content="$(cat "$spec_file")"
-  spec_content="${spec_content//$old_nvr/%{version}-%{release}}"
+  spec_content="${spec_content//$old_nvr/$nvr_replacement}"
   printf '%s\n' "$spec_content" > "$spec_file"
 else
   die "spec file Release: tag ('$old_release_value') uses neither %{?dist} nor a recognizable .fcNN suffix; refusing to guess a release rewrite"
