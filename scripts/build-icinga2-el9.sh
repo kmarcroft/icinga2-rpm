@@ -23,6 +23,14 @@ MOCK_ROOT="${MOCK_ROOT:?MOCK_ROOT is required}"
 RESULT_DIR="${RESULT_DIR:?RESULT_DIR is required}"
 DEBUG_MODE="${DEBUG_MODE:-false}"
 
+# Resolve to absolute paths up front: later steps `cd` into a scratch
+# workdir, at which point relative paths would no longer resolve.
+SRPM_PATH="$(readlink -f "$SRPM_PATH")"
+PATCH_PATH="$(readlink -f "$PATCH_PATH")"
+MOCK_CONFIGDIR="$(readlink -f "$MOCK_CONFIGDIR")"
+mkdir -p "$RESULT_DIR"
+RESULT_DIR="$(readlink -f "$RESULT_DIR")"
+
 if [[ "$DEBUG_MODE" == "true" ]]; then
   set -x
 fi
