@@ -13,6 +13,13 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 command -v dnf >/dev/null 2>&1 || die "dnf is required"
 
+# The bare almalinux:9 image doesn't ship shadow-utils, so groupadd/useradd
+# are missing and icinga2-common's %prein scriptlet fails at install time.
+if ! command -v groupadd >/dev/null 2>&1 || ! command -v useradd >/dev/null 2>&1; then
+  log "Installing shadow-utils (provides groupadd/useradd)"
+  dnf install -y shadow-utils
+fi
+
 mapfile -t rpms < <(find "$RPM_DIR" -maxdepth 1 -name '*.rpm' ! -name '*.src.rpm')
 [[ "${#rpms[@]}" -gt 0 ]] || die "no binary RPMs found in $RPM_DIR"
 
