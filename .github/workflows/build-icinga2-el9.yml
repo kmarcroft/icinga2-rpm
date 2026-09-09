@@ -294,8 +294,10 @@ jobs:
             echo "and packaging/icinga2-el9.patch in this repository for the applied EL9 compatibility changes (if any)."
           } > "$notes_file"
 
+          # result/*.rpm already matches the .src.rpm file; listing it again
+          # would upload the same asset name twice and fail with HTTP 422.
           gh release create "${{ steps.tag.outputs.tag }}" \
             --repo "${{ github.repository }}" \
             --title "icinga2 EL9 rebuild ${{ needs.discover.outputs.rpm_version }} (${{ steps.tag.outputs.internal_release }})" \
             --notes-file "$notes_file" \
-            result/*.rpm result/*.src.rpm result/checksums.sha256 result/build-manifest.json
+            result/*.rpm result/checksums.sha256 result/build-manifest.json
