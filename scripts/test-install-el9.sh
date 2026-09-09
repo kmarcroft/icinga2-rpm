@@ -15,10 +15,21 @@ command -v dnf >/dev/null 2>&1 || die "dnf is required"
 
 # The bare almalinux:9 image doesn't ship shadow-utils, so groupadd/useradd
 # are missing and icinga2-common's %prein scriptlet fails at install time.
-if ! command -v groupadd >/dev/null 2>&1 || ! command -v useradd >/dev/null 2>&1; then
-  log "Installing shadow-utils (provides groupadd/useradd)"
-  dnf install -y shadow-utils
-fi
+# Always (re-)install: shadow-utils may already be partially present
+# without providing the binaries the scriptlet needs.
+log "Ensuring shadow-utils is installed (provides groupadd/useradd)"
+dnf install -y shadow-utils
+
+# icinga2's %prein scriptlets hardcode the Fedora usr-merged path
+# /usr/bin/groupadd|useradd, but EL9/AlmaLinux keeps /usr/sbin separate
+# from /usr/bin, so shadow-utils installs there instead. Symlink so the
+# hardcoded paths resolve.
+for bin in groupadd useradd groupmod usermod; do
+  if [[ ! -e "/usr/bin/$bin" && -e "/usr/sbin/$bin" ]]; then
+    log "Symlinking /usr/bin/$bin -> /usr/sbin/$bin"
+    ln -s "/usr/sbin/$bin" "/usr/bin/$bin"
+  fi
+done
 
 mapfile -t rpms < <(find "$RPM_DIR" -maxdepth 1 -name '*.rpm' ! -name '*.src.rpm')
 [[ "${#rpms[@]}" -gt 0 ]] || die "no binary RPMs found in $RPM_DIR"
