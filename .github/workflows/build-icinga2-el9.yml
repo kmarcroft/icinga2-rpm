@@ -75,13 +75,6 @@ jobs:
           set -Eeuo pipefail
           dnf install -y --allowerasing --setopt=install_weak_deps=False \
             mock rpm-build rpmdevtools rpmlint distribution-gpg-keys gh >/dev/null
-            mock rpm-build rpmdevtools rpmlint distribution-gpg-keys gh >/dev/null
-            mock rpm-build rpmdevtools rpmlint distribution-gpg-keys gh >/dev/null
-      - name: Setup GitHub CLI
-        uses: actions/setup-gh@v1
-        with:
-          github-cli-version: latest
-
       - name: Find and verify newest Icinga 2 SRPM
         id: find
         env:
