@@ -74,6 +74,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           dnf install -y --allowerasing --setopt=install_weak_deps=False curl rpm rpmdevtools gnupg2 findutils gawk >/dev/null
+      - name: Setup GitHub CLI
+        uses: actions/setup-gh@v1
+        with:
+          github-cli-version: latest
 
       - name: Find and verify newest Icinga 2 SRPM
         id: find
