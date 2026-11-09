@@ -1,17 +1,12 @@
 ## EL9 compatibility patch for the Icinga 2 spec file.
 ##
-## This file is intentionally a no-op placeholder: as of the last review,
-## the Fedora 44 icinga2.spec builds unchanged inside the EL9 mock chroot
-## defined in mock/icinga2-el9-x86_64.cfg once the release tag is rewritten
-## (which scripts/build-icinga2-el9.sh does automatically and unconditionally,
-## independent of this patch).
+## This file contains the minimal EL9 compatibility changes required by the
+## current Fedora 44 icinga2.spec. scripts/build-icinga2-el9.sh detects
+## unified-diff hunks (lines starting with "---", "+++", or "@@") and applies
+## them to the matching files extracted from the SRPM.
 ##
-## scripts/build-icinga2-el9.sh detects whether this file contains real
-## unified-diff hunks (lines starting with "---", "+++", or "@@"). Since it
-## does not, the build script logs that no compatibility patch was applied
-## and proceeds with the unmodified (release-rewritten) spec file.
-##
-## If a future Fedora 44 SRPM introduces an EL9-incompatible construct
+## If a future Fedora 44 SRPM changes these sections or introduces another
+## EL9-incompatible construct
 ## (e.g. a BuildRequires only available in Fedora, a %fedora conditional
 ## that excludes EL9, a macro not defined on EL9), replace the contents of
 ## this file with a minimal `diff -u` against the extracted icinga2.spec,
@@ -65,36 +60,36 @@
 ## %{buildroot} macro directly instead of the hardcoded Fedora path.
 --- a/icinga2.spec
 +++ b/icinga2.spec
-@@ -183,25 +183,25 @@
+@@ -184,25 +184,25 @@
  cd -
  
  %install
--DESTDIR="%_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT" ninja-build install
+-DESTDIR="%_topdir/BUILD/icinga2-2.16.6-build/BUILDROOT" ninja-build install
 +DESTDIR="%{buildroot}" ninja-build install
  
--install -D -m 0644 etc/initsystem/icinga2.service.limits.conf %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/etc/systemd/system/icinga2.service.d/limits.conf
+-install -D -m 0644 etc/initsystem/icinga2.service.limits.conf %_topdir/BUILD/icinga2-2.16.6-build/BUILDROOT/etc/systemd/system/icinga2.service.d/limits.conf
 +install -D -m 0644 etc/initsystem/icinga2.service.limits.conf %{buildroot}/etc/systemd/system/icinga2.service.d/limits.conf
  
--rm -f %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT//etc/icinga2/features-enabled/*.conf
+-rm -f %_topdir/BUILD/icinga2-2.16.6-build/BUILDROOT//etc/icinga2/features-enabled/*.conf
 +rm -f %{buildroot}//etc/icinga2/features-enabled/*.conf
  
  cd tools/selinux
  for selinuxvariant in mls targeted
  do
--install -d %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/selinux/${selinuxvariant}
+-install -d %_topdir/BUILD/icinga2-2.16.6-build/BUILDROOT/usr/share/selinux/${selinuxvariant}
 +install -d %{buildroot}/usr/share/selinux/${selinuxvariant}
  install -p -m 644 icinga2.pp.${selinuxvariant} \
--%_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/selinux/${selinuxvariant}/icinga2.pp
+-%_topdir/BUILD/icinga2-2.16.6-build/BUILDROOT/usr/share/selinux/${selinuxvariant}/icinga2.pp
 +%{buildroot}/usr/share/selinux/${selinuxvariant}/icinga2.pp
  done
  cd -
  
--install -D -m 0644 tools/syntax/vim/syntax/icinga2.vim %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/vim/vimfiles/syntax/icinga2.vim
--install -D -m 0644 tools/syntax/vim/ftdetect/icinga2.vim %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/vim/vimfiles/ftdetect/icinga2.vim
+-install -D -m 0644 tools/syntax/vim/syntax/icinga2.vim %_topdir/BUILD/icinga2-2.16.6-build/BUILDROOT/usr/share/vim/vimfiles/syntax/icinga2.vim
+-install -D -m 0644 tools/syntax/vim/ftdetect/icinga2.vim %_topdir/BUILD/icinga2-2.16.6-build/BUILDROOT/usr/share/vim/vimfiles/ftdetect/icinga2.vim
 +install -D -m 0644 tools/syntax/vim/syntax/icinga2.vim %{buildroot}/usr/share/vim/vimfiles/syntax/icinga2.vim
 +install -D -m 0644 tools/syntax/vim/ftdetect/icinga2.vim %{buildroot}/usr/share/vim/vimfiles/ftdetect/icinga2.vim
  
--install -D -m 0644 tools/syntax/nano/icinga2.nanorc %_topdir/BUILD/icinga2-2.16.5-build/BUILDROOT/usr/share/nano/icinga2.nanorc
+-install -D -m 0644 tools/syntax/nano/icinga2.nanorc %_topdir/BUILD/icinga2-2.16.6-build/BUILDROOT/usr/share/nano/icinga2.nanorc
 +install -D -m 0644 tools/syntax/nano/icinga2.nanorc %{buildroot}/usr/share/nano/icinga2.nanorc
  
  %check
