@@ -21,7 +21,9 @@ RPM_VERSION="${RPM_VERSION:?RPM_VERSION is required}"
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-command -v gh >/dev/null 2>&1 || die "gh CLI is required"
+for c in curl jq; do
+  command -v "$c" >/dev/null 2>&1 || die "required command not found: $c"
+done
 
 emit() {
   local key="$1" value="$2"
@@ -35,19 +37,32 @@ prefix="icinga2-el9-${RPM_VERSION}-"
 log "Checking for an existing published release with tag prefix: $prefix"
 
 matched_tag=""
-# gh release list only ever returns non-draft releases by default when
-# --exclude-drafts is passed; we also explicitly filter out drafts here
-# in case the flag is unavailable on the runner's gh version.
-while IFS=$'\t' read -r tag is_draft; do
-  [[ -z "$tag" ]] && continue
-  [[ "$is_draft" == "true" ]] && continue
-  if [[ "$tag" == "$prefix"* ]]; then
-    matched_tag="$tag"
-    break
-  fi
-done < <(gh release list --repo "$REPO" --limit 200 \
-            --json tagName,isDraft \
-            --jq '.[] | [.tagName, (.isDraft|tostring)] | @tsv' 2>/dev/null || true)
+page=1
+while :; do
+  releases_json="$(curl --fail --location --silent --show-error \
+    --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60 \
+    --header "Accept: application/vnd.github+json" \
+    --header "Authorization: Bearer $GH_TOKEN" \
+    --header "X-GitHub-Api-Version: 2022-11-28" \
+    "https://api.github.com/repos/${REPO}/releases?per_page=100&page=${page}")" \
+    || die "failed to query GitHub releases API (page $page)"
+
+  jq -e 'type == "array"' >/dev/null <<<"$releases_json" \
+    || die "GitHub releases API returned an unexpected response (page $page)"
+
+  while IFS=$'\t' read -r tag is_draft; do
+    [[ -z "$tag" ]] && continue
+    [[ "$is_draft" == "true" ]] && continue
+    if [[ "$tag" == "$prefix"* ]]; then
+      matched_tag="$tag"
+      break 2
+    fi
+  done < <(jq -r '.[] | [.tag_name, (.draft|tostring)] | @tsv' <<<"$releases_json")
+
+  release_count="$(jq 'length' <<<"$releases_json")"
+  (( release_count < 100 )) && break
+  (( page++ ))
+done
 
 if [[ -n "$matched_tag" ]]; then
   log "Found existing published release matching this upstream version: $matched_tag"

@@ -100,7 +100,9 @@ The workflow runs weekly (`cron: "17 3 * * 1"`). On schedule triggers only,
 version has already been published as a GitHub Release; if so, the build,
 test, and release jobs are skipped and the job summary states why. A
 previously **failed** run is never treated as "published", so a failed
-scheduled build will be retried on the next run.
+scheduled build will be retried on the next run. The release lookup uses the
+GitHub REST API with the workflow token, rather than depending on the GitHub
+CLI being available in the AlmaLinux discovery container.
 
 ## 10. How newest-version detection works
 

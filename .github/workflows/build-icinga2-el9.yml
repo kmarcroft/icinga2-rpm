@@ -74,7 +74,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           dnf install -y --allowerasing --setopt=install_weak_deps=False \
-            mock rpm-build rpmdevtools rpmlint distribution-gpg-keys gh >/dev/null
+            curl jq rpmdevtools >/dev/null
       - name: Find and verify newest Icinga 2 SRPM
         id: find
         env:
